@@ -281,50 +281,6 @@ with st.spinner("Loading datasets..."):
 summary = summarize_neighbourhoods(trees, areas)
 
 # -----------------------------
-# Sidebar filters (apply to Explore tab)
-# -----------------------------
-st.sidebar.header("Filters")
-
-neighbourhoods = ["(All)"] + (sorted(areas["NAME"].dropna().unique().tolist()) if "NAME" in areas.columns else [])
-nb = st.sidebar.selectbox("Local Area", neighbourhoods, index=0)
-
-species_opts = ["(All)"] + (sorted(trees["SPECIES_NAME"].dropna().unique().tolist()) if "SPECIES_NAME" in trees.columns else [])
-sp = st.sidebar.selectbox("Species (Latin)", species_opts, index=0)
-
-common_opts = ["(All)"] + (sorted(trees["COMMON_NAME"].dropna().unique().tolist()) if "COMMON_NAME" in trees.columns else [])
-cn = st.sidebar.selectbox("Common Name", common_opts, index=0)
-
-if "DATE_PLANTED" in trees.columns and pd.to_datetime(trees["DATE_PLANTED"], errors="coerce").notna().any():
-    yser = pd.to_datetime(trees["DATE_PLANTED"], errors="coerce").dt.year.dropna().astype(int)
-    min_year = int(yser.min())
-    max_year = int(yser.max())
-else:
-    min_year = 1900
-    max_year = 2100
-yr_min = st.sidebar.slider("Planted Year (minimum)", min_year, max_year, min_year)
-
-if "DIAMETER" in trees.columns and trees["DIAMETER"].notna().any():
-    dmin_all = int(np.floor(trees["DIAMETER"].min()))
-    dmax_all = int(np.ceil(trees["DIAMETER"].max()))
-else:
-    dmin_all, dmax_all = 0, 100
-min_diam = st.sidebar.slider("Minimum Diameter (inches)", dmin_all, dmax_all, dmin_all)
-
-# Apply filters to a working copy
-df = trees.copy()
-if nb != "(All)":
-    df = df[df["LOCAL_AREA"] == nb]
-if sp != "(All)" and "SPECIES_NAME" in df.columns:
-    df = df[df["SPECIES_NAME"] == sp]
-if cn != "(All)" and "COMMON_NAME" in df.columns:
-    df = df[df["COMMON_NAME"] == cn]
-if "DATE_PLANTED" in df.columns:
-    years = pd.to_datetime(df["DATE_PLANTED"], errors="coerce").dt.year
-    df = df[years >= yr_min]
-if "DIAMETER" in df.columns:
-    df = df[df["DIAMETER"].fillna(0) >= min_diam]
-
-# -----------------------------
 # Tabs
 # -----------------------------
 tab1, tab2, tab3 = st.tabs(["Explore Trees", "Neighbourhood Overview", "Green Comfort Zones"])
@@ -332,50 +288,101 @@ tab1, tab2, tab3 = st.tabs(["Explore Trees", "Neighbourhood Overview", "Green Co
 # Explore Trees tab
 with tab1:
     st.subheader("Interactive Tree Map")
-    st.caption("Points are sampled if the dataset is large to keep the map responsive.")
-    m = make_point_map(df, areas_gdf=areas, highlight_area=None if nb == "(All)" else nb, max_points=6000)
-    st_folium(m, height=560, width=None)
 
-    st.markdown("### Key Stats (Filtered)")
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Trees shown", f"{len(df):,}")
-    c2.metric("Unique species", f"{df['SPECIES_NAME'].dropna().nunique():,}" if "SPECIES_NAME" in df.columns else "n/a")
-    c3.metric("Avg diameter (in)", f"{df['DIAMETER'].mean():.1f}" if "DIAMETER" in df.columns and pd.notnull(df['DIAMETER'].mean()) else "n/a")
-    if "DATE_PLANTED" in df.columns:
-        yrs = pd.to_datetime(df["DATE_PLANTED"], errors="coerce").dt.year
-        yr_min_f = int(yrs.min()) if yrs.notna().any() else None
-        yr_max_f = int(yrs.max()) if yrs.notna().any() else None
-        c4.metric("Planting year range", f"{yr_min_f if yr_min_f is not None else '–'} – {yr_max_f if yr_max_f is not None else '–'}")
-    else:
-        c4.metric("Planting year range", "n/a")
+    # Layout: left filter panel, right content
+    filter_col, main_col = st.columns([1, 3])
 
-    st.markdown("### Distributions (Filtered)")
-    colA, colB = st.columns(2)
-    with colA:
-        st.markdown("**Top 15 Common Names**")
-        if "COMMON_NAME" in df.columns and not df.empty:
-            top_common = df["COMMON_NAME"].fillna("Unknown").value_counts().nlargest(15).reset_index()
-            top_common.columns = ["Common Name", "Count"]
-            chart = alt.Chart(top_common).mark_bar().encode(
-                x="Count:Q", y=alt.Y("Common Name:N", sort="-x")
-            ).properties(height=350)
-            st.altair_chart(chart, use_container_width=True)
+    with filter_col:
+        st.markdown("### Filters")
+
+        neighbourhoods = ["(All)"] + (sorted(areas["NAME"].dropna().unique().tolist()) if "NAME" in areas.columns else [])
+        nb = st.selectbox("Local Area", neighbourhoods, index=0)
+
+        species_opts = ["(All)"] + (
+            sorted(trees["SPECIES_NAME"].dropna().unique().tolist()) if "SPECIES_NAME" in trees.columns else []
+        )
+        sp = st.selectbox("Species (Latin)", species_opts, index=0)
+
+        common_opts = ["(All)"] + (
+            sorted(trees["COMMON_NAME"].dropna().unique().tolist()) if "COMMON_NAME" in trees.columns else []
+        )
+        cn = st.selectbox("Common Name", common_opts, index=0)
+
+        if "DATE_PLANTED" in trees.columns and pd.to_datetime(trees["DATE_PLANTED"], errors="coerce").notna().any():
+            yser = pd.to_datetime(trees["DATE_PLANTED"], errors="coerce").dt.year.dropna().astype(int)
+            min_year = int(yser.min())
+            max_year = int(yser.max())
         else:
-            st.info("No common-name data to plot.")
+            min_year = 1900
+            max_year = 2100
+        yr_min = st.slider("Planted Year (minimum)", min_year, max_year, min_year)
 
-    with colB:
-        st.markdown("**Planting Year Histogram**")
+        if "DIAMETER" in trees.columns and trees["DIAMETER"].notna().any():
+            dmin_all = int(np.floor(trees["DIAMETER"].min()))
+            dmax_all = int(np.ceil(trees["DIAMETER"].max()))
+        else:
+            dmin_all, dmax_all = 0, 100
+        min_diam = st.slider("Minimum Diameter (inches)", dmin_all, dmax_all, dmin_all)
+
+        # Apply filters
+        df = trees.copy()
+        if nb != "(All)":
+            df = df[df["LOCAL_AREA"] == nb]
+        if sp != "(All)" and "SPECIES_NAME" in df.columns:
+            df = df[df["SPECIES_NAME"] == sp]
+        if cn != "(All)" and "COMMON_NAME" in df.columns:
+            df = df[df["COMMON_NAME"] == cn]
         if "DATE_PLANTED" in df.columns:
-            year_series = pd.to_datetime(df["DATE_PLANTED"], errors="coerce").dt.year.dropna().astype(int)
-            if not year_series.empty:
-                chart2 = alt.Chart(pd.DataFrame({"Year": year_series})).mark_bar().encode(
-                    x="Year:O", y="count()"
-                ).properties(height=350)
-                st.altair_chart(chart2, use_container_width=True)
-            else:
-                st.info("No valid planting years to plot.")
+            years = pd.to_datetime(df["DATE_PLANTED"], errors="coerce").dt.year
+            df = df[years >= yr_min]
+        if "DIAMETER" in df.columns:
+            df = df[df["DIAMETER"].fillna(0) >= min_diam]
+
+    with main_col:
+        st.caption("Points are sampled if the dataset is large to keep the map responsive.")
+        m = make_point_map(df, areas_gdf=areas, highlight_area=None if nb == "(All)" else nb, max_points=6000)
+        st_folium(m, height=560, width=None)
+
+        st.markdown("### Key Stats (Filtered)")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Trees shown", f"{len(df):,}")
+        c2.metric("Unique species", f"{df['SPECIES_NAME'].dropna().nunique():,}" if "SPECIES_NAME" in df.columns else "n/a")
+        c3.metric("Avg diameter (in)", f"{df['DIAMETER'].mean():.1f}" if "DIAMETER" in df.columns and pd.notnull(df["DIAMETER"].mean()) else "n/a")
+        if "DATE_PLANTED" in df.columns:
+            yrs = pd.to_datetime(df["DATE_PLANTED"], errors="coerce").dt.year
+            yr_min_f = int(yrs.min()) if yrs.notna().any() else None
+            yr_max_f = int(yrs.max()) if yrs.notna().any() else None
+            c4.metric("Planting year range", f"{yr_min_f if yr_min_f is not None else '–'} – {yr_max_f if yr_max_f is not None else '–'}")
         else:
-            st.info("No planting year field available.")
+            c4.metric("Planting year range", "n/a")
+
+        st.markdown("### Distributions (Filtered)")
+        colA, colB = st.columns(2)
+        with colA:
+            st.markdown("**Top 15 Common Names**")
+            if "COMMON_NAME" in df.columns and not df.empty:
+                top_common = df["COMMON_NAME"].fillna("Unknown").value_counts().nlargest(15).reset_index()
+                top_common.columns = ["Common Name", "Count"]
+                chart = alt.Chart(top_common).mark_bar().encode(
+                    x="Count:Q", y=alt.Y("Common Name:N", sort="-x")
+                ).properties(height=350)
+                st.altair_chart(chart, use_container_width=True)
+            else:
+                st.info("No common-name data to plot.")
+
+        with colB:
+            st.markdown("**Planting Year Histogram**")
+            if "DATE_PLANTED" in df.columns:
+                year_series = pd.to_datetime(df["DATE_PLANTED"], errors="coerce").dt.year.dropna().astype(int)
+                if not year_series.empty:
+                    chart2 = alt.Chart(pd.DataFrame({"Year": year_series})).mark_bar().encode(
+                        x="Year:O", y="count()"
+                    ).properties(height=350)
+                    st.altair_chart(chart2, use_container_width=True)
+                else:
+                    st.info("No valid planting years to plot.")
+            else:
+                st.info("No planting year field available.")
 
 # Neighbourhood Overview
 with tab2:
@@ -403,12 +410,19 @@ with tab2:
 # Green Comfort Zones
 with tab3:
     st.subheader("Green Comfort Zones (High-Density Neighbourhoods)")
-    st.caption(
-        "Green Comfort Zones are defined here as neighbourhoods in the top 20% of tree density (trees per km²). "
-        "This is a simple, rule-based approximation of areas with especially rich tree cover."
+
+    q = st.slider(
+        "Select the percentile threshold for defining Green Comfort Zones",
+        min_value=0.5,
+        max_value=0.95,
+        value=0.8,
+        step=0.05,
+        help="Neighbourhoods above this percentile of tree density are labeled as Green Comfort Zones.",
     )
 
-    thr, mask = compute_green_comfort_zones(summary, q=0.8)
+    st.caption(f"Current threshold: Top {int((1 - q) * 100)}% of neighbourhoods by tree density.")
+
+    thr, mask = compute_green_comfort_zones(summary, q=q)
 
     if not np.isnan(thr):
         total_areas = summary["LOCAL_AREA"].nunique()
@@ -440,6 +454,11 @@ with tab3:
         # AI SUMMARY SECTION
         # -----------------------------
         st.markdown("### AI Summary of Green Comfort Zones")
+
+        st.caption(
+            "The AI summary uses OpenAI's `gpt-5-mini` model to interpret the Green Comfort Zones "
+            "and describe patterns in density and species richness in plain language."
+        )
 
         if not OPENAI_AVAILABLE:
             st.info("To enable AI summaries, install the `openai` Python package.")
