@@ -470,7 +470,7 @@ with tab3:
 
         c1, c2, c3 = st.columns(3)
         c1.metric("Comfort zones found", f"{num_winners} / {total_areas}")
-        c2.metric("Density threshold (80th percentile)",
+        c2.metric("Density threshold",
                   f"{thr:.0f} trees/km²")
         c3.metric("Median density (context)",
                   f"{summary['trees_per_km2'].median():.0f} trees/km²")
