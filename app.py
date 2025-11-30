@@ -18,6 +18,8 @@ PRIMARY = "#2E7D32"
 # -----------------------------
 # Loaders
 # -----------------------------
+
+
 @st.cache_data
 def load_trees_from_csv(path: str) -> pd.DataFrame:
     df = pd.read_csv(path, sep=None, engine="python", on_bad_lines="skip")
@@ -28,10 +30,12 @@ def load_trees_from_csv(path: str) -> pd.DataFrame:
             df["LATITUDE"] = pd.to_numeric(parts[0], errors="coerce")
             df["LONGITUDE"] = pd.to_numeric(parts[1], errors="coerce")
     if "DATE_PLANTED" in df.columns:
-        df["DATE_PLANTED"] = pd.to_datetime(df["DATE_PLANTED"], errors="coerce")
+        df["DATE_PLANTED"] = pd.to_datetime(
+            df["DATE_PLANTED"], errors="coerce")
     if "DIAMETER" in df.columns:
         df["DIAMETER"] = pd.to_numeric(df["DIAMETER"], errors="coerce")
     return df
+
 
 @st.cache_data
 def load_local_areas(path: str) -> gpd.GeoDataFrame:
@@ -43,30 +47,40 @@ def load_local_areas(path: str) -> gpd.GeoDataFrame:
 # -----------------------------
 # Spatial Join & Metrics
 # -----------------------------
+
+
 def attach_neighbourhood(trees_df: pd.DataFrame, areas_gdf: gpd.GeoDataFrame) -> pd.DataFrame:
     gtrees = gpd.GeoDataFrame(
         trees_df.copy(),
-        geometry=gpd.points_from_xy(trees_df["LONGITUDE"], trees_df["LATITUDE"]),
+        geometry=gpd.points_from_xy(
+            trees_df["LONGITUDE"], trees_df["LATITUDE"]),
         crs="EPSG:4326",
     )
-    joined = gpd.sjoin(gtrees, areas_gdf[["NAME", "geometry"]], how="left", predicate="within")
+    joined = gpd.sjoin(
+        gtrees, areas_gdf[["NAME", "geometry"]], how="left", predicate="within")
     joined = joined.rename(columns={"NAME": "LOCAL_AREA"})
     return pd.DataFrame(joined.drop(columns=["index_right"]))
+
 
 def compute_area_km2(areas_gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     metric = areas_gdf.to_crs(26910)  # NAD83 / UTM zone 10N
     areas_gdf["AREA_KM2"] = metric.geometry.area / 1e6
     return areas_gdf
 
+
 def summarize_neighbourhoods(trees_with_area: pd.DataFrame, areas_gdf: gpd.GeoDataFrame) -> pd.DataFrame:
     grp = trees_with_area.groupby("LOCAL_AREA", dropna=False).agg(
         trees=("LOCAL_AREA", "count"),
-        unique_species=("SPECIES_NAME", lambda s: s.dropna().nunique() if "SPECIES_NAME" in trees_with_area.columns else 0),
-        avg_diameter=("DIAMETER", "mean") if "DIAMETER" in trees_with_area.columns else ("LOCAL_AREA", "size"),
+        unique_species=("SPECIES_NAME", lambda s: s.dropna().nunique(
+        ) if "SPECIES_NAME" in trees_with_area.columns else 0),
+        avg_diameter=("DIAMETER", "mean") if "DIAMETER" in trees_with_area.columns else (
+            "LOCAL_AREA", "size"),
         oldest_year=("DATE_PLANTED", lambda s: int(pd.to_datetime(s, errors="coerce").dt.year.min())
-                     if pd.to_datetime(s, errors="coerce").notna().any() else np.nan) if "DATE_PLANTED" in trees_with_area.columns else ("LOCAL_AREA", "size"),
+                     if pd.to_datetime(s, errors="coerce").notna().any() else np.nan)
+                     if "DATE_PLANTED" in trees_with_area.columns else ("LOCAL_AREA", "size"),
         newest_year=("DATE_PLANTED", lambda s: int(pd.to_datetime(s, errors="coerce").dt.year.max())
-                     if pd.to_datetime(s, errors="coerce").notna().any() else np.nan) if "DATE_PLANTED" in trees_with_area.columns else ("LOCAL_AREA", "size"),
+                     if pd.to_datetime(s, errors="coerce").notna().any() else np.nan)
+                     if "DATE_PLANTED" in trees_with_area.columns else ("LOCAL_AREA", "size"),
     ).reset_index()
 
     if "avg_diameter" not in grp.columns:
@@ -76,7 +90,8 @@ def summarize_neighbourhoods(trees_with_area: pd.DataFrame, areas_gdf: gpd.GeoDa
     if "newest_year" not in grp.columns:
         grp["newest_year"] = np.nan
 
-    areas_small = areas_gdf[["NAME", "AREA_KM2"]].rename(columns={"NAME": "LOCAL_AREA"})
+    areas_small = areas_gdf[["NAME", "AREA_KM2"]].rename(
+        columns={"NAME": "LOCAL_AREA"})
     out = grp.merge(areas_small, on="LOCAL_AREA", how="left")
     out["trees_per_km2"] = out["trees"] / out["AREA_KM2"]
     return out
@@ -84,25 +99,22 @@ def summarize_neighbourhoods(trees_with_area: pd.DataFrame, areas_gdf: gpd.GeoDa
 # -----------------------------
 # Green Comfort Zone helpers
 # -----------------------------
+
+
 def compute_green_comfort_zones(summary_df: pd.DataFrame, q: float = 0.8):
-    """
-    Define Green Comfort Zones as neighbourhoods in the top q quantile
-    of tree density (trees_per_km2).
-    """
-    ser = summary_df["trees_per_km2"].replace([np.inf, -np.inf], np.nan).dropna()
+    ser = summary_df["trees_per_km2"].replace(
+        [np.inf, -np.inf], np.nan).dropna()
     if ser.empty:
         return np.nan, pd.Series(False, index=summary_df.index)
     thr = ser.quantile(q)
     mask = summary_df["trees_per_km2"] >= thr
     return thr, mask
 
+
 def make_green_comfort_map(areas_gdf: gpd.GeoDataFrame, summary_df: pd.DataFrame, mask: pd.Series) -> folium.Map:
-    """
-    Folium map highlighting Green Comfort Zones (top density neighbourhoods)
-    in green, others not shown.
-    """
     winners = summary_df.loc[mask, "LOCAL_AREA"].dropna().unique().tolist()
-    m = folium.Map(location=[49.2827, -123.1207], zoom_start=12, tiles="CartoDB Positron")
+    m = folium.Map(location=[49.2827, -123.1207],
+                   zoom_start=12, tiles="CartoDB Positron")
 
     if not winners:
         return m
@@ -129,7 +141,8 @@ def make_green_comfort_map(areas_gdf: gpd.GeoDataFrame, summary_df: pd.DataFrame
         trees = r.get("trees", np.nan)
         sp = r.get("unique_species", np.nan)
         html = f"<b>{r.get('NAME', 'Unknown')}</b><br>"
-        html += f"Trees/km²: {dens:.0f}<br>" if pd.notnull(dens) else "Trees/km²: n/a<br>"
+        html += f"Trees/km²: {dens:.0f}<br>" if pd.notnull(
+            dens) else "Trees/km²: n/a<br>"
         html += f"Total trees: {int(trees) if pd.notnull(trees) else 'n/a'}<br>"
         html += f"Unique species: {int(sp) if pd.notnull(sp) else 'n/a'}"
 
@@ -147,6 +160,8 @@ def make_green_comfort_map(areas_gdf: gpd.GeoDataFrame, summary_df: pd.DataFrame
 # -----------------------------
 # Map helpers
 # -----------------------------
+
+
 def make_point_map(df_points: pd.DataFrame, areas_gdf: gpd.GeoDataFrame, highlight_area: str | None, max_points: int = 6000):
     # Fallback location = Vancouver
     loc = [49.2827, -123.1207]
@@ -169,7 +184,8 @@ def make_point_map(df_points: pd.DataFrame, areas_gdf: gpd.GeoDataFrame, highlig
                 folium.GeoJson(
                     sel.to_json(),
                     name=f"Selected: {highlight_area}",
-                    style_function=lambda _: dict(color=PRIMARY, weight=3, fill=False),
+                    style_function=lambda _: dict(
+                        color=PRIMARY, weight=3, fill=False),
                 ).add_to(m)
 
     # Add tree points with sampling for performance
@@ -200,8 +216,8 @@ def make_point_map(df_points: pd.DataFrame, areas_gdf: gpd.GeoDataFrame, highlig
     folium.LayerControl().add_to(m)
     return m
 
+
 def _safe_bins(series: pd.Series, k: int = 6) -> list:
-    """Build quantile bins robustly for choropleth."""
     ser = series.replace([np.inf, -np.inf], np.nan).dropna()
     if ser.empty:
         return [0, 1]
@@ -210,15 +226,16 @@ def _safe_bins(series: pd.Series, k: int = 6) -> list:
         qs = np.array([ser.min(), ser.max() + 1e-9])
     return qs.tolist()
 
+
 def make_area_choropleth(areas_gdf: gpd.GeoDataFrame, summary_df: pd.DataFrame,
                          metric_col: str, legend_name: str) -> folium.Map:
-    """Folium choropleth of tree density (or other metric) by Local Area."""
     g = areas_gdf.merge(
         summary_df[["LOCAL_AREA", metric_col, "trees", "unique_species"]],
         left_on="NAME", right_on="LOCAL_AREA", how="left"
     )
 
-    m = folium.Map(location=[49.2827, -123.1207], zoom_start=12, tiles="CartoDB Positron")
+    m = folium.Map(location=[49.2827, -123.1207],
+                   zoom_start=12, tiles="CartoDB Positron")
 
     bins = _safe_bins(g[metric_col], k=6)
     folium.Choropleth(
@@ -253,13 +270,15 @@ def make_area_choropleth(areas_gdf: gpd.GeoDataFrame, summary_df: pd.DataFrame,
 
         gj = folium.GeoJson(
             r["geometry"].__geo_interface__,
-            style_function=lambda _: {"color": "#444", "weight": 0.5, "fillOpacity": 0},
+            style_function=lambda _: {
+                "color": "#444", "weight": 0.5, "fillOpacity": 0},
             tooltip=folium.Tooltip(html),
         )
         gj.add_to(m)
 
     folium.LayerControl().add_to(m)
     return m
+
 
 # -----------------------------
 # Main App
@@ -274,7 +293,8 @@ with st.spinner("Loading datasets..."):
     areas = compute_area_km2(load_local_areas(DATA_AREAS))
 
     # Keep only rows with valid coordinates for mapping/join
-    trees_raw = trees_raw[trees_raw["LATITUDE"].between(-90, 90) & trees_raw["LONGITUDE"].between(-180, 180)]
+    trees_raw = trees_raw[trees_raw["LATITUDE"].between(
+        -90, 90) & trees_raw["LONGITUDE"].between(-180, 180)]
     trees = attach_neighbourhood(trees_raw, areas)
 
 # Precompute neighbourhood summary for Neighbourhood Overview + Comfort Zones
@@ -283,7 +303,8 @@ summary = summarize_neighbourhoods(trees, areas)
 # -----------------------------
 # Tabs
 # -----------------------------
-tab1, tab2, tab3 = st.tabs(["Explore Trees", "Neighbourhood Overview", "Green Comfort Zones"])
+tab1, tab2, tab3 = st.tabs(
+    ["Explore Trees", "Neighbourhood Overview", "Green Comfort Zones"])
 
 # Explore Trees tab
 with tab1:
@@ -295,34 +316,40 @@ with tab1:
     with filter_col:
         st.markdown("### Filters")
 
-        neighbourhoods = ["(All)"] + (sorted(areas["NAME"].dropna().unique().tolist()) if "NAME" in areas.columns else [])
+        neighbourhoods = [
+            "(All)"] + (sorted(areas["NAME"].dropna().unique().tolist()) if "NAME" in areas.columns else [])
         nb = st.selectbox("Local Area", neighbourhoods, index=0)
 
         species_opts = ["(All)"] + (
-            sorted(trees["SPECIES_NAME"].dropna().unique().tolist()) if "SPECIES_NAME" in trees.columns else []
+            sorted(trees["SPECIES_NAME"].dropna().unique().tolist()
+                   ) if "SPECIES_NAME" in trees.columns else []
         )
         sp = st.selectbox("Species (Latin)", species_opts, index=0)
 
         common_opts = ["(All)"] + (
-            sorted(trees["COMMON_NAME"].dropna().unique().tolist()) if "COMMON_NAME" in trees.columns else []
+            sorted(trees["COMMON_NAME"].dropna().unique().tolist()
+                   ) if "COMMON_NAME" in trees.columns else []
         )
         cn = st.selectbox("Common Name", common_opts, index=0)
 
         if "DATE_PLANTED" in trees.columns and pd.to_datetime(trees["DATE_PLANTED"], errors="coerce").notna().any():
-            yser = pd.to_datetime(trees["DATE_PLANTED"], errors="coerce").dt.year.dropna().astype(int)
+            yser = pd.to_datetime(
+                trees["DATE_PLANTED"], errors="coerce").dt.year.dropna().astype(int)
             min_year = int(yser.min())
             max_year = int(yser.max())
         else:
             min_year = 1900
             max_year = 2100
-        yr_min = st.slider("Planted Year (minimum)", min_year, max_year, min_year)
+        yr_min = st.slider("Planted Year (minimum)",
+                           min_year, max_year, min_year)
 
         if "DIAMETER" in trees.columns and trees["DIAMETER"].notna().any():
             dmin_all = int(np.floor(trees["DIAMETER"].min()))
             dmax_all = int(np.ceil(trees["DIAMETER"].max()))
         else:
             dmin_all, dmax_all = 0, 100
-        min_diam = st.slider("Minimum Diameter (inches)", dmin_all, dmax_all, dmin_all)
+        min_diam = st.slider("Minimum Diameter (inches)",
+                             dmin_all, dmax_all, dmin_all)
 
         # Apply filters
         df = trees.copy()
@@ -339,20 +366,25 @@ with tab1:
             df = df[df["DIAMETER"].fillna(0) >= min_diam]
 
     with main_col:
-        st.caption("Points are sampled if the dataset is large to keep the map responsive.")
-        m = make_point_map(df, areas_gdf=areas, highlight_area=None if nb == "(All)" else nb, max_points=6000)
+        st.caption(
+            "Points are sampled if the dataset is large to keep the map responsive.")
+        m = make_point_map(
+            df, areas_gdf=areas, highlight_area=None if nb == "(All)" else nb, max_points=6000)
         st_folium(m, height=560, width=None)
 
         st.markdown("### Key Stats (Filtered)")
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Trees shown", f"{len(df):,}")
-        c2.metric("Unique species", f"{df['SPECIES_NAME'].dropna().nunique():,}" if "SPECIES_NAME" in df.columns else "n/a")
-        c3.metric("Avg diameter (in)", f"{df['DIAMETER'].mean():.1f}" if "DIAMETER" in df.columns and pd.notnull(df["DIAMETER"].mean()) else "n/a")
+        c2.metric("Unique species",
+                  f"{df['SPECIES_NAME'].dropna().nunique():,}" if "SPECIES_NAME" in df.columns else "n/a")
+        c3.metric("Avg diameter (in)", f"{df['DIAMETER'].mean():.1f}" if "DIAMETER" in df.columns and pd.notnull(
+            df["DIAMETER"].mean()) else "n/a")
         if "DATE_PLANTED" in df.columns:
             yrs = pd.to_datetime(df["DATE_PLANTED"], errors="coerce").dt.year
             yr_min_f = int(yrs.min()) if yrs.notna().any() else None
             yr_max_f = int(yrs.max()) if yrs.notna().any() else None
-            c4.metric("Planting year range", f"{yr_min_f if yr_min_f is not None else '–'} – {yr_max_f if yr_max_f is not None else '–'}")
+            c4.metric("Planting year range",
+                      f"{yr_min_f if yr_min_f is not None else '–'} – {yr_max_f if yr_max_f is not None else '–'}")
         else:
             c4.metric("Planting year range", "n/a")
 
@@ -361,7 +393,8 @@ with tab1:
         with colA:
             st.markdown("**Top 15 Common Names**")
             if "COMMON_NAME" in df.columns and not df.empty:
-                top_common = df["COMMON_NAME"].fillna("Unknown").value_counts().nlargest(15).reset_index()
+                top_common = df["COMMON_NAME"].fillna(
+                    "Unknown").value_counts().nlargest(15).reset_index()
                 top_common.columns = ["Common Name", "Count"]
                 chart = alt.Chart(top_common).mark_bar().encode(
                     x="Count:Q", y=alt.Y("Common Name:N", sort="-x")
@@ -373,7 +406,8 @@ with tab1:
         with colB:
             st.markdown("**Planting Year Histogram**")
             if "DATE_PLANTED" in df.columns:
-                year_series = pd.to_datetime(df["DATE_PLANTED"], errors="coerce").dt.year.dropna().astype(int)
+                year_series = pd.to_datetime(
+                    df["DATE_PLANTED"], errors="coerce").dt.year.dropna().astype(int)
                 if not year_series.empty:
                     chart2 = alt.Chart(pd.DataFrame({"Year": year_series})).mark_bar().encode(
                         x="Year:O", y="count()"
@@ -384,17 +418,20 @@ with tab1:
             else:
                 st.info("No planting year field available.")
 
-# Neighbourhood Overview
+# Neighbourhood Overview tab
 with tab2:
     st.subheader("Density Choropleth & Ranking")
 
     st.markdown("**Tree Density (trees per km²)**")
-    choromap = make_area_choropleth(areas, summary, metric_col="trees_per_km2", legend_name="Trees per km²")
+    choromap = make_area_choropleth(
+        areas, summary, metric_col="trees_per_km2", legend_name="Trees per km²")
     st_folium(choromap, height=560, width=None)
 
     st.markdown("**Neighbourhood Ranking (by Density)**")
-    rank_df = summary[["LOCAL_AREA", "trees", "unique_species", "avg_diameter", "oldest_year", "newest_year", "AREA_KM2", "trees_per_km2"]].copy()
-    rank_df = rank_df.sort_values("trees_per_km2", ascending=False).reset_index(drop=True)
+    rank_df = summary[["LOCAL_AREA", "trees", "unique_species", "avg_diameter",
+                       "oldest_year", "newest_year", "AREA_KM2", "trees_per_km2"]].copy()
+    rank_df = rank_df.sort_values(
+        "trees_per_km2", ascending=False).reset_index(drop=True)
     rank_df_display = rank_df.rename(columns={
         "LOCAL_AREA": "Local Area",
         "trees": "Trees",
@@ -407,7 +444,7 @@ with tab2:
     })
     st.dataframe(rank_df_display, use_container_width=True, hide_index=True)
 
-# Green Comfort Zones
+# Green Comfort Zones tab
 with tab3:
     st.subheader("Green Comfort Zones (High-Density Neighbourhoods)")
 
@@ -417,10 +454,12 @@ with tab3:
         max_value=0.95,
         value=0.8,
         step=0.05,
-        help="Neighbourhoods above this percentile of tree density are labeled as Green Comfort Zones.",
+        help="Neighbourhoods above this percentile of tree density " \
+        "are labeled as Green Comfort Zones.",
     )
 
-    st.caption(f"Current threshold: Top {int((1 - q) * 100)}% of neighbourhoods by tree density.")
+    st.caption(
+        f"Current threshold: Top {int((1 - q) * 100)}% of neighbourhoods by tree density.")
 
     thr, mask = compute_green_comfort_zones(summary, q=q)
 
@@ -431,16 +470,20 @@ with tab3:
 
         c1, c2, c3 = st.columns(3)
         c1.metric("Comfort zones found", f"{num_winners} / {total_areas}")
-        c2.metric("Density threshold (80th percentile)", f"{thr:.0f} trees/km²")
-        c3.metric("Median density (context)", f"{summary['trees_per_km2'].median():.0f} trees/km²")
+        c2.metric("Density threshold (80th percentile)",
+                  f"{thr:.0f} trees/km²")
+        c3.metric("Median density (context)",
+                  f"{summary['trees_per_km2'].median():.0f} trees/km²")
 
         st.markdown("**Map of Green Comfort Zones**")
         comfort_map = make_green_comfort_map(areas, summary, mask)
         st_folium(comfort_map, height=560, width=None)
 
         st.markdown("**High-Density Neighbourhoods (Green Comfort Zones)**")
-        winners_display = winners[["LOCAL_AREA", "trees", "unique_species", "AREA_KM2", "trees_per_km2"]].copy()
-        winners_display = winners_display.sort_values("trees_per_km2", ascending=False)
+        winners_display = winners[[
+            "LOCAL_AREA", "trees", "unique_species", "AREA_KM2", "trees_per_km2"]].copy()
+        winners_display = winners_display.sort_values(
+            "trees_per_km2", ascending=False)
         winners_display = winners_display.rename(columns={
             "LOCAL_AREA": "Local Area",
             "trees": "Trees",
@@ -448,10 +491,11 @@ with tab3:
             "AREA_KM2": "Area (km²)",
             "trees_per_km2": "Trees/km²",
         })
-        st.dataframe(winners_display, use_container_width=True, hide_index=True)
+        st.dataframe(winners_display,
+                     use_container_width=True, hide_index=True)
 
         # -----------------------------
-        # AI SUMMARY SECTION
+        # AI Summary Section
         # -----------------------------
         st.markdown("### AI Summary of Green Comfort Zones")
 
@@ -469,7 +513,6 @@ with tab3:
             )
         else:
             if st.button("Generate AI Summary"):
-                # Build a compact description of the winners to send to the model
                 summary_rows = winners_display.to_dict(orient="records")
                 stats_text_lines = []
                 for row in summary_rows:
@@ -504,7 +547,7 @@ with tab3:
                             model=model_name,
                             input=prompt,
                             max_output_tokens=300,
-                            reasoning={"effort": "minimal"}, 
+                            reasoning={"effort": "minimal"},
                         )
 
                     summary_text = getattr(resp, "output_text", None)
@@ -515,9 +558,11 @@ with tab3:
                     st.markdown(summary_text)
 
                 except Exception as e:
-                    st.caption(f"AI summary could not be generated (error: {e}).")
+                    st.caption(
+                        f"AI summary could not be generated (error: {e}).")
 
     else:
         st.info("Not enough valid density data to compute Green Comfort Zones.")
 
-st.caption("Data: City of Vancouver Open Data (Public Trees & Local Area Boundaries).")
+st.caption(
+    "Data: City of Vancouver Open Data (Public Trees & Local Area Boundaries).")
